@@ -4,9 +4,9 @@ import zlib
 
 """This approach is clearly less useful than polynomial
 interpolation-based approach in priv_kv_store.py"""
-_B = 64//8  ## representation size of the keys
+_B = 32//8  ## representation size of the keys
 CTX_SIZE = 1024//8   ## representation size of the values
-N_FIXED_VALUES = 1024*1024  ## Max #points to fix in kv store
+N_FIXED_VALUES = int(2**15)  ## Max #points to fix in kv store
 
 def hash_to(r, nb, k):
     return hash(r + k) % nb

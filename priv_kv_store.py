@@ -21,9 +21,9 @@ are programmed values.
 
 """
 
-_B = 64//8  ## representation size of the keys
+_B = 128//8  ## representation size of the keys
 CTX_SIZE = 1024//8   ## representation size of the values
-N_FIXED_VALUES = 1024*1024  ## Max #points to fix in kv store
+N_FIXED_VALUES = 128  ## Max #points to fix in kv store
 
 ## Prime that will be used to define the prime field
 ## 2**64 - 59, 2**128 - 159, or 2**256 - 189 (Very slow!!)
@@ -68,6 +68,8 @@ class PrivKeyValueStore(object):
         ## if not hash the keys first.
         ks = [bytes_to_field_elems(e)[0] for e in keys]
         vals = list(zip(*[bytes_to_field_elems(e) for e in values]))
+        s = time.time()
+        print("Starting to create polynomials!")
         self.poly_arr = [
             PrivPoly(ks.copy(), list(vs))
             for vs in vals
@@ -104,6 +106,7 @@ class PrivKeyValueStore(object):
 
 class PrivPoly(object):
     def __init__(self, keys=[], values=[]):
+        global s
         if not keys:
             return
         assert len(keys) == len(values), f"keys and values are of different sizes, {len(keys)}, {len(values)}"
@@ -117,6 +120,9 @@ class PrivPoly(object):
             keys.extend(t_x_arr)
             values.extend(t_y_arr)
         self.poly = galois.lagrange_poly(G(keys), G(values))
+        e = time.time()
+        print(f"One lagrange interpolation done in {e-s}"); s = e
+
 
     def _eval(self, x):
         return self.poly(x)
@@ -167,7 +173,7 @@ def test_privkeyvaluestore(store):
     """store can be PrivKeyValueStore, or PrivKeyValueStore_hash"""
     print(f"\n-------- TESTING with {store} ---------------")
     keys=[c.to_bytes(_B, 'little')
-          for c in [0, 12312, 123, 1, 9485857484, 9]]
+          for c in [0, 12312, 123, 1, 94858574, 9]]
     values=[c.to_bytes(CTX_SIZE, 'little')
         for c in [223, 3, 123844, 234234, 12123, 345346]]
     pkv = store(dict(zip(keys, values)))
