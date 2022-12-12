@@ -21,15 +21,15 @@ are programmed values.
 
 """
 
+_B = 64//8  ## representation size of the keys
+CTX_SIZE = 1024//8   ## representation size of the values
+N_FIXED_VALUES = 1024*1024  ## Max #points to fix in kv store
+
 ## Prime that will be used to define the prime field
 ## 2**64 - 59, 2**128 - 159, or 2**256 - 189 (Very slow!!)
-_B = 64//8 
 LARGE_PRIME = galois.prev_prime(2**(_B*8))  
 assert galois.is_prime(LARGE_PRIME)
-CTX_SIZE = 1024//8   ## 
 
-# Number of points that can be fixed in the polynomial
-N_FIXED_VALUES = 32
 
 G = galois.GF(LARGE_PRIME)
 e = time.time()
@@ -149,102 +149,23 @@ class PrivPoly(object):
         self.poly = galois.Poly(coeffs)
         
 
-def hash_to(r, nb, k):
-    return hash(r + k) % nb
-
-from hashlib import pbkdf2_hmac
-def prg(seed, n):
-    return pbkdf2_hmac('sha256', seed, b'', 1, dklen=n)
-
-def xor(a, b):
-    return (int.from_bytes(a, 'little') ^ int.from_bytes(b, 'little'))\
-        .to_bytes(len(a), 'little')
-
-def aesenc(k, m):
-    iv = os.urandom(16)
-    return iv + xor(prg(iv + k, len(m)), m)
-
-def aesdec(k, c):
-    iv = c[:16]; c = c[16:]
-    return xor(prg(iv + k, len(c)), c)
-
-class PrivKeyValueStore_hash(object):
-    def __init__(self, d=None):
-        """Assume keys are all smaller than 128-bit, and values are 1024-bit"""
-        if not d:
-            return
-        self.r, self.D = self.fill_values(d)
-        
-    def fill_values(self, d):
-        nb = 3*N_FIXED_VALUES
-        D = [None for _ in range(nb)]
-        ntry = 0
-        while ntry<5:
-            failed = False
-            r = os.urandom(8)
-            jset = {}
-            for k in d.keys():
-                j = hash_to(r, nb, k)
-                if j in jset:
-                    print(f"Index Collision!! Retrying: {ntry}")
-                    failed = True
-                    break
-                jset[k] = j
-            if not failed:
-                break
-            if failed:
-                raise ("Abort, could not create a fixed hash bucket")
-            ntry += 1
-
-        for k, v in d.items():
-            j = jset[k]
-            D[j] = aesenc(k, v)
-            
-        for i in range(len(D)):
-            if not D[i]:
-                D[i] = os.urandom(CTX_SIZE)
-
-        return r, D
-
-    def serialize(self, compressed=False):
-        s = self.r + b''.join(self.D)
-        if compressed:
-            return zlib.compress(s, 3)
-        else:
-            return s
-    
-    def deserialize(self, s, compressed=False):
-        if compressed:
-            s = zlib.decompress(s)
-        self.r = s[:8]; s = s[8:]
-        self.D = [
-            s[i:i+CTX_SIZE] for i in range(0, len(s), CTX_SIZE)
-        ]
-        nb = len(self.D)
-
-    def query(self, k):
-        nb = len(self.D)
-        j = hash_to(self.r, nb, k)
-        return aesdec(k, self.D[j])
-
-
-
+#----------- In-file TEST ---------------------------------------------
 def test_privpoly():
     keys=[0, 12312, 123, 1, 9485857484, 9];
     values=[223, 3, 123844, 234234, 12123, 345346]
     p = PrivPoly(keys=keys, values=values)
     print(p.poly)
     s = p.serialize()
-    print(s, len(s))
     # ------
     q = PrivPoly()
     q.deserialize(s)
     for k, v in zip(keys, values):
         assert q._eval(k) == v
 
+from priv_kv_store_using_hash import PrivKeyValueStore_hash # Only for testing
 def test_privkeyvaluestore(store):
     """store can be PrivKeyValueStore, or PrivKeyValueStore_hash"""
-    print(f"-------- TESTING with {store} ---------------")
+    print(f"\n-------- TESTING with {store} ---------------")
     keys=[c.to_bytes(_B, 'little')
           for c in [0, 12312, 123, 1, 9485857484, 9]]
     values=[c.to_bytes(CTX_SIZE, 'little')
@@ -257,7 +178,7 @@ def test_privkeyvaluestore(store):
     
     print("---> Testing de/serialization")
     pkv_s = pkv.serialize(compressed=True)
-    print(f"pkv_s = {len(pkv_s)}")
+    print(f"Size of the string to send for {N_FIXED_VALUES} keys is {len(pkv_s)}")
     qkv = store()
     qkv.deserialize(pkv_s, compressed=True)
     for k, v in zip(keys, values):
